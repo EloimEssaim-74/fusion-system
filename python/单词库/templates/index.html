@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>艾宾浩斯背单词</title>
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { padding-top: 20px; background: #f5f7fa; }
+        .container { max-width: 800px; }
+        .card { margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .progress-bar { transition: width 0.3s; }
+        .word-display { font-size: 2rem; font-weight: bold; margin: 20px 0; }
+        .hidden { display: none; }
+        .btn-option { min-width: 120px; }
+        .result-correct { color: green; }
+        .result-wrong { color: red; }
+        .stat-item { margin: 5px 0; }
+        .section-title { border-bottom: 2px solid #0d6efd; padding-bottom: 10px; margin-bottom: 20px; }
+        #memory-test-area, #learn-area, #summary-area { display: none; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1 class="text-center mb-4">📚 艾宾浩斯背单词</h1>
+
+    <!-- 任务概览 -->
+    <div id="overview-area" class="card">
+        <div class="card-body">
+            <h5 class="card-title section-title">📋 今日任务</h5>
+            <div id="task-info">
+                <p>复习：<span id="review-count">0</span> 个</p>
+                <p>新学：<span id="new-count">0</span> 个</p>
+                <p>总计：<span id="total-count">0</span> 个</p>
+                <p>今日已复习：<span id="today-review-learned">0</span> 个</p>
+                <p>今日已学新词：<span id="today-new-learned">0</span> 个</p>
+            </div>
+            <button id="start-test-btn" class="btn btn-primary">📝 开始记忆检查（最多150词）</button>
+            <button id="skip-test-btn" class="btn btn-secondary ms-2">⏭️ 跳过检查，直接学习</button>
+        </div>
+    </div>
+
+    <!-- 记忆检查 -->
+    <div id="memory-test-area" class="card">
+        <div class="card-body">
+            <h5 class="card-title section-title">📝 记忆检查</h5>
+            <div class="progress mb-3">
+                <div id="test-progress-bar" class="progress-bar" role="progressbar" style="width: 0%;">0%</div>
+            </div>
+            <p>第 <span id="test-current">0</span> / <span id="test-total">0</span> 个</p>
+            <div class="word-display" id="test-word">loading...</div>
+            <div class="mb-3">
+                <label for="test-input" class="form-label">请输入中文释义：</label>
+                <input type="text" id="test-input" class="form-control" placeholder="输入后按回车或点击提交">
+            </div>
+            <button id="test-submit-btn" class="btn btn-primary">提交</button>
+            <button id="test-skip-btn" class="btn btn-secondary ms-2">跳过（显示释义）</button>
+            <div id="test-result" class="mt-2"></div>
+            <div id="test-summary" class="mt-3"></div>
+        </div>
+    </div>
+
+    <!-- 正式学习 -->
+    <div id="learn-area" class="card">
+        <div class="card-body">
+            <h5 class="card-title section-title">📖 正式学习</h5>
+            <div class="progress mb-3">
+                <div id="learn-progress-bar" class="progress-bar" role="progressbar" style="width: 0%;">0%</div>
+            </div>
+            <p>第 <span id="learn-current">0</span> / <span id="learn-total">0</span> 个</p>
+            <div class="word-display" id="learn-word">loading...</div>
+            <div id="learn-meaning" class="mb-3" style="display:none;"></div>
+            <div>
+                <button id="learn-yes-btn" class="btn btn-success btn-option">✅ 认识</button>
+                <button id="learn-no-btn" class="btn btn-danger btn-option">❌ 不认识</button>
+            </div>
+            <div id="learn-result" class="mt-2"></div>
+        </div>
+    </div>
+
+    <!-- 完成总结 -->
+    <div id="summary-area" class="card">
+        <div class="card-body">
+            <h5 class="card-title section-title">🎉 今日学习完成</h5>
+            <p>新学单词：<span id="final-new">0</span> 个</p>
+            <p>复习单词：<span id="final-review">0</span> 个</p>
+            <button id="back-overview-btn" class="btn btn-primary">返回概览</button>
+        </div>
+    </div>
+
+    <!-- 统计信息 -->
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5 class="card-title section-title">📊 学习统计</h5>
+            <div id="stats-content">
+                <p>总单词数：<span id="stat-total">0</span></p>
+                <p>已学单词：<span id="stat-learned">0</span></p>
+                <p>未学单词：<span id="stat-unlearned">0</span></p>
+                <p>今日待复习：<span id="stat-due">0</span></p>
+            </div>
+            <button id="refresh-stats-btn" class="btn btn-outline-secondary btn-sm">刷新统计</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ---------- 全局状态 ----------
+    let tasks = null;               // { review_words, new_words, review_count, new_count, total, today_review_learned, today_new_learned }
+    let allWords = [];             // 复习词 + 新词 的扁平数组，每个元素包含 id, word, meaning, isReview
+    let testWords = [];            // 记忆检查抽取的单词列表
+    let testIndex = 0;
+    let testCorrectCount = 0;
+    let learnWords = [];           // 正式学习的单词列表（同 allWords）
+    let learnIndex = 0;
+    let learningCompleted = false;
+
+    // DOM 元素
+    const overviewArea = document.getElementById('overview-area');
+    const memoryTestArea = document.getElementById('memory-test-area');
+    const learnArea = document.getElementById('learn-area');
+    const summaryArea = document.getElementById('summary-area');
+
+    const reviewCountSpan = document.getElementById('review-count');
+    const newCountSpan = document.getElementById('new-count');
+    const totalCountSpan = document.getElementById('total-count');
+    const todayReviewLearnedSpan = document.getElementById('today-review-learned');
+    const todayNewLearnedSpan = document.getElementById('today-new-learned');
+
+    const startTestBtn = document.getElementById('start-test-btn');
+    const skipTestBtn = document.getElementById('skip-test-btn');
+    const backOverviewBtn = document.getElementById('back-overview-btn');
+
+    const testProgressBar = document.getElementById('test-progress-bar');
+    const testCurrentSpan = document.getElementById('test-current');
+    const testTotalSpan = document.getElementById('test-total');
+    const testWordDiv = document.getElementById('test-word');
+    const testInput = document.getElementById('test-input');
+    const testSubmitBtn = document.getElementById('test-submit-btn');
+    const testSkipBtn = document.getElementById('test-skip-btn');
+    const testResultDiv = document.getElementById('test-result');
+    const testSummaryDiv = document.getElementById('test-summary');
+
+    const learnProgressBar = document.getElementById('learn-progress-bar');
+    const learnCurrentSpan = document.getElementById('learn-current');
+    const learnTotalSpan = document.getElementById('learn-total');
+    const learnWordDiv = document.getElementById('learn-word');
+    const learnMeaningDiv = document.getElementById('learn-meaning');
+    const learnYesBtn = document.getElementById('learn-yes-btn');
+    const learnNoBtn = document.getElementById('learn-no-btn');
+    const learnResultDiv = document.getElementById('learn-result');
+
+    const finalNewSpan = document.getElementById('final-new');
+    const finalReviewSpan = document.getElementById('final-review');
+
+    const statTotal = document.getElementById('stat-total');
+    const statLearned = document.getElementById('stat-learned');
+    const statUnlearned = document.getElementById('stat-unlearned');
+    const statDue = document.getElementById('stat-due');
+    const refreshStatsBtn = document.getElementById('refresh-stats-btn');
+
+    // ---------- 辅助函数 ----------
+    function showArea(area) {
+        [overviewArea, memoryTestArea, learnArea, summaryArea].forEach(el => el.style.display = 'none');
+        area.style.display = 'block';
+    }
+
+    async function fetchAPI(url, options = {}) {
+        const res = await fetch(url, options);
+        return res.json();
+    }
+
+    async function loadTasks() {
+        tasks = await fetchAPI('/api/today_tasks');
+        reviewCountSpan.textContent = tasks.review_count;
+        newCountSpan.textContent = tasks.new_count;
+        totalCountSpan.textContent = tasks.total;
+        todayReviewLearnedSpan.textContent = tasks.today_review_learned;
+        todayNewLearnedSpan.textContent = tasks.today_new_learned;
+        // 构建 allWords
+        allWords = [];
+        tasks.review_words.forEach(w => allWords.push({ ...w, isReview: true }));
+        tasks.new_words.forEach(w => allWords.push({ ...w, isReview: false }));
+        return tasks;
+    }
+
+    async function refreshStats() {
+        const stats = await fetchAPI('/api/stats');
+        statTotal.textContent = stats.total;
+        statLearned.textContent = stats.learned;
+        statUnlearned.textContent = stats.unlearned;
+        statDue.textContent = stats.due_review;
+    }
+
+    // ---------- 记忆检查 ----------
+    function startMemoryTest() {
+        if (allWords.length === 0) {
+            alert('今日没有可学习的单词。');
+            return;
+        }
+        // 随机抽取最多 TEST_COUNT 个
+        const shuffled = [...allWords];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        testWords = shuffled.slice(0, Math.min(TEST_COUNT, shuffled.length));
+        testIndex = 0;
+        testCorrectCount = 0;
+        showArea(memoryTestArea);
+        renderTestWord();
+    }
+
+    function renderTestWord() {
+        if (testIndex >= testWords.length) {
+            finishMemoryTest();
+            return;
+        }
+        const word = testWords[testIndex];
+        testWordDiv.textContent = word.word;
+        testCurrentSpan.textContent = testIndex + 1;
+        testTotalSpan.textContent = testWords.length;
+        testProgressBar.style.width = ((testIndex / testWords.length) * 100) + '%';
+        testProgressBar.textContent = Math.round((testIndex / testWords.length) * 100) + '%';
+        testInput.value = '';
+        testResultDiv.innerHTML = '';
+        testSummaryDiv.innerHTML = '';
+        testInput.focus();
+        // 启用按钮
+        testSubmitBtn.disabled = false;
+        testSkipBtn.disabled = false;
+        testInput.disabled = false;
+    }
+
+    async function handleTestSubmit() {
+        const word = testWords[testIndex];
+        const userAnswer = testInput.value.trim();
+        if (userAnswer === '') {
+            alert('请输入中文释义或点击跳过。');
+            return;
+        }
+        // 发送请求
+        const result = await fetchAPI('/api/memory_check', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ word_id: word.id, user_answer: userAnswer })
+        });
+        const correct = result.correct;
+        if (correct) testCorrectCount++;
+        // 显示结果
+        const icon = correct ? '✅' : '❌';
+        const color = correct ? 'result-correct' : 'result-wrong';
+        testResultDiv.innerHTML = `<span class="${color}">${icon} 你的答案：${userAnswer}，正确释义：${result.meaning}</span>`;
+        // 禁用按钮，等待用户点击下一题
+        testSubmitBtn.disabled = true;
+        testSkipBtn.disabled = true;
+        testInput.disabled = true;
+        // 显示“下一题”按钮
+        const nextBtn = document.createElement('button');
+        nextBtn.textContent = testIndex < testWords.length - 1 ? '下一题 →' : '查看结果';
+        nextBtn.className = 'btn btn-primary mt-2';
+        nextBtn.onclick = () => {
+            testIndex++;
+            renderTestWord();
+        };
+        testResultDiv.appendChild(nextBtn);
+    }
+
+    function handleTestSkip() {
+        // 跳过：显示释义，不计入正确数
+        const word = testWords[testIndex];
+        testResultDiv.innerHTML = `⏭️ 跳过，正确释义：${word.meaning}`;
+        testSubmitBtn.disabled = true;
+        testSkipBtn.disabled = true;
+        testInput.disabled = true;
+        const nextBtn = document.createElement('button');
+        nextBtn.textContent = testIndex < testWords.length - 1 ? '下一题 →' : '查看结果';
+        nextBtn.className = 'btn btn-secondary mt-2';
+        nextBtn.onclick = () => {
+            testIndex++;
+            renderTestWord();
+        };
+        testResultDiv.appendChild(nextBtn);
+    }
+
+    function finishMemoryTest() {
+        // 显示总结
+        const total = testWords.length;
+        const rate = total > 0 ? (testCorrectCount / total * 100).toFixed(1) : 0;
+        testSummaryDiv.innerHTML = `
+            <div class="alert alert-info">
+                <strong>记忆检查完成！</strong><br>
+                正确：${testCorrectCount} / ${total} （${rate}%）
+            </div>
+        `;
+        // 自动进入学习
+        setTimeout(() => {
+            startLearning();
+        }, 1500);
+    }
+
+    // ---------- 正式学习 ----------
+    function startLearning() {
+        learnWords = allWords;  // 全部任务
+        learnIndex = 0;
+        showArea(learnArea);
+        renderLearnWord();
+    }
+
+    function renderLearnWord() {
+        if (learnIndex >= learnWords.length) {
+            finishLearning();
+            return;
+        }
+        const word = learnWords[learnIndex];
+        learnWordDiv.textContent = word.word;
+        learnMeaningDiv.style.display = 'none';
+        learnMeaningDiv.textContent = '';
+        learnResultDiv.innerHTML = '';
+        learnCurrentSpan.textContent = learnIndex + 1;
+        learnTotalSpan.textContent = learnWords.length;
+        learnProgressBar.style.width = ((learnIndex / learnWords.length) * 100) + '%';
+        learnProgressBar.textContent = Math.round((learnIndex / learnWords.length) * 100) + '%';
+        // 启用按钮
+        learnYesBtn.disabled = false;
+        learnNoBtn.disabled = false;
+    }
+
+    async function handleLearn(recognize) {
+        const word = learnWords[learnIndex];
+        // 禁用按钮防止重复提交
+        learnYesBtn.disabled = true;
+        learnNoBtn.disabled = true;
+        // 发送请求
+        await fetchAPI('/api/learn', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                word_id: word.id,
+                recognize: recognize,
+                is_review: word.isReview
+            })
+        });
+        // 显示释义
+        learnMeaningDiv.style.display = 'block';
+        learnMeaningDiv.textContent = `📝 释义：${word.meaning}`;
+        const msg = recognize ? '✅ 记住了！' : '❌ 需要再复习。';
+        learnResultDiv.innerHTML = msg;
+        // 加载下一词或完成
+        setTimeout(() => {
+            learnIndex++;
+            renderLearnWord();
+        }, 1000);
+    }
+
+    function finishLearning() {
+        // 显示完成总结
+        showArea(summaryArea);
+        // 获取最终进度
+        fetchAPI('/api/today_tasks').then(data => {
+            finalNewSpan.textContent = data.today_new_learned;
+            finalReviewSpan.textContent = data.today_review_learned;
+        });
+        refreshStats();
+    }
+
+    // ---------- 事件绑定 ----------
+    startTestBtn.addEventListener('click', async () => {
+        await loadTasks();
+        if (allWords.length === 0) {
+            alert('今日没有可学习的单词。');
+            return;
+        }
+        startMemoryTest();
+    });
+
+    skipTestBtn.addEventListener('click', async () => {
+        await loadTasks();
+        if (allWords.length === 0) {
+            alert('今日没有可学习的单词。');
+            return;
+        }
+        startLearning();
+    });
+
+    backOverviewBtn.addEventListener('click', () => {
+        showArea(overviewArea);
+        loadTasks();
+        refreshStats();
+    });
+
+    testSubmitBtn.addEventListener('click', handleTestSubmit);
+    testSkipBtn.addEventListener('click', handleTestSkip);
+    testInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (!testSubmitBtn.disabled) handleTestSubmit();
+        }
+    });
+
+    learnYesBtn.addEventListener('click', () => handleLearn(true));
+    learnNoBtn.addEventListener('click', () => handleLearn(false));
+
+    refreshStatsBtn.addEventListener('click', refreshStats);
+
+    // ---------- 初始化 ----------
+    window.onload = async function() {
+        await loadTasks();
+        refreshStats();
+        showArea(overviewArea);
+    };
+</script>
+</body>
+</html>

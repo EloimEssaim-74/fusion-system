@@ -1,0 +1,188 @@
+version: '3.8'
+
+services:
+  # ============================================
+  # MySQL 8.0 - 数据库
+  # ============================================
+  mysql:
+    image: mysql:8.0
+    container_name: kb-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: kb_platform
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./config/sql/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - kb-network
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ============================================
+  # Redis 7 - 缓存与排行榜
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    container_name: kb-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - kb-network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ============================================
+  # RabbitMQ 3 - 消息队列
+  # ============================================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: kb-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - kb-network
+    healthcheck:
+      test: [ "CMD", "rabbitmq-diagnostics", "check_port_connectivity" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ============================================
+  # Nacos 2.2 - 注册/配置中心
+  # ============================================
+  nacos:
+    image: nacos/nacos-server:v2.2.0
+    container_name: kb-nacos
+    environment:
+      - MODE=standalone
+      - PREFER_HOST_MODE=hostname
+    ports:
+      - "8848:8848"
+      - "9848:9848"
+    volumes:
+      - nacos_data:/home/nacos/data
+    networks:
+      - kb-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness" ]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  # ============================================
+  # Gateway Service - API网关
+  # ============================================
+  gateway:
+    build: ./gateway-service
+    container_name: kb-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - REDIS_HOST=redis
+    depends_on:
+      nacos:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - kb-network
+
+  # ============================================
+  # User Service - 用户服务
+  # ============================================
+  user-service:
+    build: ./user-service
+    container_name: kb-user-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=root123
+      - REDIS_HOST=redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+    networks:
+      - kb-network
+
+  # ============================================
+  # Article Service - 文章服务
+  # ============================================
+  article-service:
+    build: ./article-service
+    container_name: kb-article-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=root123
+      - REDIS_HOST=redis
+      - RABBITMQ_HOST=rabbitmq
+    depends_on:
+      mysql:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - kb-network
+
+  # ============================================
+  # Interact Service - 互动服务
+  # ============================================
+  interact-service:
+    build: ./interact-service
+    container_name: kb-interact-service
+    environment:
+      - NACOS_SERVER_ADDR=nacos:8848
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=root123
+      - REDIS_HOST=redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - kb-network
+
+volumes:
+  mysql_data:
+  redis_data:
+  rabbitmq_data:
+  nacos_data:
+
+networks:
+  kb-network:
+    driver: bridge

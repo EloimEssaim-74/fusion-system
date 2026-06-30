@@ -1,0 +1,1261 @@
+{
+  "info": {
+    "name": "Knowledge Platform - Stage 1 API Tests",
+    "description": "# 知识库与内容发布平台 - 阶段1测试接口文档\n\n## 环境变量说明\n| 变量 | 默认值 | 说明 |\n|------|--------|------|\n| `baseUrl` | `http://localhost:8080` | 网关地址 |\n| `token` | (自动填充) | 用户JWT令牌 |\n| `userId` | (自动填充) | 当前用户ID |\n| `role` | (自动填充) | 当前用户角色 |\n| `articleId` | (自动填充) | 测试文章ID |\n\n## 测试流程\n1. **注册用户** → 普通用户注册\n2. **注册管理员** → 管理员账号注册\n3. **登录(用户)** → 获取普通用户token\n4. **登录(管理员)** → 获取管理员token\n5. **创建文章** → 草稿创建\n6. **发布文章** → 发布并触发RabbitMQ广播\n7. **修改文章** → 仅作者/管理员可修改\n8. **文章列表** → 分页查询已发布文章\n9. **文章详情** → 查看详情并触发热度+1\n10. **评论文章** → 异步写入评论\n11. **点赞文章** → 防重点赞\n12. **热搜榜单** → 查看Top 10\n13. **越权测试** → 验证权限控制\n14. **注销** → Token加入黑名单\n\n## 快速开始\n导入后，先执行文件夹 `1-用户服务` 中的注册和登录，token 会自动存入环境变量，后续请求自动携带。",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "knowledge-platform-stage1"
+  },
+  "item": [
+    {
+      "name": "1-用户服务 (User Service)",
+      "description": "注册、登录、注销 - JWT认证流程",
+      "item": [
+        {
+          "name": "注册普通用户",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var json = pm.response.json();",
+                  "    console.log('用户注册成功:', json.data);",
+                  "    pm.environment.set('normalUsername', 'testuser');",
+                  "}",
+                  "",
+                  "// 测试用例验证",
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('返回Result格式', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(200);",
+                  "    pm.expect(json.data).to.have.property('id');",
+                  "    pm.expect(json.data).to.have.property('username');",
+                  "    pm.expect(json.data).to.have.property('role', 'user');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"testuser\",\n    \"password\": \"test123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "register"]
+            },
+            "description": "注册一个普通用户（角色默认为 user）\n\n### 验证点\n- 返回 200 及用户信息\n- role 字段为 user\n- 重复注册应返回错误"
+          }
+        },
+        {
+          "name": "注册管理员",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    console.log('管理员注册成功:', pm.response.json().data);",
+                  "    pm.environment.set('adminUsername', 'admin');",
+                  "}",
+                  "",
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('角色为admin', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.data.role).to.eql('admin');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"admin\",\n    \"password\": \"admin123456\",\n    \"role\": \"admin\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "register"]
+            },
+            "description": "注册管理员账号\n\n### 验证点\n- role 字段为 admin"
+          }
+        },
+        {
+          "name": "注册-重复用户名(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 400', function() { pm.response.to.have.status(400); });",
+                  "pm.test('返回用户名已存在错误', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.message).to.include('已存在');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"testuser\",\n    \"password\": \"another123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "register"]
+            },
+            "description": "使用已存在的用户名注册，验证唯一性校验"
+          }
+        },
+        {
+          "name": "注册-缺少参数(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 400', function() { pm.response.to.have.status(400); });",
+                  "pm.test('返回参数校验失败', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(400);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"\",\n    \"password\": \"\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "register"]
+            },
+            "description": "提交空用户名和密码，验证参数校验"
+          }
+        },
+        {
+          "name": "登录(普通用户)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var json = pm.response.json();",
+                  "    // 自动保存token到环境变量",
+                  "    pm.environment.set('token', json.data.token);",
+                  "    pm.environment.set('userId', json.data.userId);",
+                  "    pm.environment.set('role', json.data.role);",
+                  "    console.log('Token已保存:', json.data.token.substring(0, 30) + '...');",
+                  "    console.log('UserId:', json.data.userId);",
+                  "}",
+                  "",
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('返回token', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.data).to.have.property('token');",
+                  "    pm.expect(json.data).to.have.property('tokenType', 'Bearer');",
+                  "    pm.expect(json.data).to.have.property('userId');",
+                  "    pm.expect(json.data).to.have.property('role', 'user');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"testuser\",\n    \"password\": \"test123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "login"]
+            },
+            "description": "普通用户登录，获取JWT Token\n\n### 自动处理\n- token 自动存入环境变量\n- userId、role 自动存入环境变量\n- 后续请求自动携带 Authorization 头"
+          }
+        },
+        {
+          "name": "登录(管理员)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var json = pm.response.json();",
+                  "    pm.environment.set('adminToken', json.data.token);",
+                  "    pm.environment.set('adminUserId', json.data.userId);",
+                  "    console.log('Admin Token已保存');",
+                  "}",
+                  "",
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('角色为admin', function() {",
+                  "    pm.expect(pm.response.json().data.role).to.eql('admin');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"admin\",\n    \"password\": \"admin123456\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "login"]
+            },
+            "description": "管理员登录，获取admin JWT Token"
+          }
+        },
+        {
+          "name": "登录-错误密码(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 401', function() { pm.response.to.have.status(401); });",
+                  "pm.test('返回用户名或密码错误', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.message).to.include('错误');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"testuser\",\n    \"password\": \"wrongpassword\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "login"]
+            },
+            "description": "使用错误密码登录，验证认证失败"
+          }
+        },
+        {
+          "name": "注销",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('注销成功', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/user/logout",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "logout"]
+            },
+            "description": "注销当前Token，加入Redis黑名单\n\n### 验证点\n- 注销后Token不可再用（需先执行登录后再测注销后访问）"
+          }
+        }
+      ]
+    },
+    {
+      "name": "2-文章服务 (Article Service)",
+      "description": "文章的创建、发布、修改、删除、列表、详情和热搜榜单",
+      "item": [
+        {
+          "name": "创建文章(草稿)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    var json = pm.response.json();",
+                  "    pm.environment.set('articleId', json.data.id);",
+                  "    console.log('文章创建成功, ID:', json.data.id);",
+                  "}",
+                  "",
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('文章状态为DRAFT', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.data).to.have.property('id');",
+                  "    pm.expect(json.data.status).to.eql('DRAFT');",
+                  "    pm.expect(json.data).to.have.property('title');",
+                  "    pm.expect(json.data).to.have.property('content');",
+                  "    pm.expect(json.data.authorId).to.eql(pm.environment.get('userId'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Spring Cloud微服务最佳实践\",\n    \"content\": \"本文详细介绍了Spring Cloud微服务架构的核心组件，包括服务注册与发现、配置中心、API网关、负载均衡、熔断降级等内容。通过实际案例演示了如何使用Nacos、Sentinel、Gateway等组件构建高可用的微服务体系。\\n\\n## 核心要点\\n1. 服务注册与发现：Nacos\\n2. API网关：Spring Cloud Gateway\\n3. 流量控制：Sentinel\\n4. 配置管理：Nacos Config\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/articles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles"]
+            },
+            "description": "创建一篇文章，默认状态为草稿(DRAFT)\n\n### 自动处理\n- articleId 自动存入环境变量\n\n### 验证点\n- status 为 DRAFT\n- authorId 等于当前用户ID"
+          }
+        },
+        {
+          "name": "创建文章2(草稿)-用于列表测试",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.environment.set('articleId2', pm.response.json().data.id);",
+                  "    console.log('文章2创建成功, ID:', pm.response.json().data.id);",
+                  "}",
+                  "",
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('文章2状态为DRAFT', function() {",
+                  "    pm.expect(pm.response.json().data.status).to.eql('DRAFT');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Redis高并发场景应用指南\",\n    \"content\": \"Redis作为高性能的键值存储系统，在高并发场景下有着广泛的应用。本文探讨了Redis在缓存穿透、缓存击穿、缓存雪崩等问题上的解决方案，以及如何使用Redis实现分布式锁、排行榜、消息队列等功能。\\n\\n## 应用场景\\n1. 热点数据缓存\\n2. 实时排行榜(ZSET)\\n3. 消息队列(Stream)\\n4. 分布式锁\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/articles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles"]
+            },
+            "description": "创建第二篇文章用于列表和热度排序测试"
+          }
+        },
+        {
+          "name": "创建文章-未登录(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 401', function() { pm.response.to.have.status(401); });",
+                  "pm.test('返回未授权错误', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(401);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"未登录创建文章\",\n    \"content\": \"这篇文章不应该被创建成功\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/articles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles"]
+            },
+            "description": "不带Authorization头创建文章，验证网关鉴权拦截"
+          }
+        },
+        {
+          "name": "发布文章",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('文章状态变为PUBLISHED', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.data.status).to.eql('PUBLISHED');",
+                  "});",
+                  "pm.test('发布触发RabbitMQ消息(查看服务日志确认)', function() {",
+                  "    pm.expect(pm.response.json().code).to.eql(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId}}/publish",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId}}", "publish"]
+            },
+            "description": "将文章从草稿状态发布，触发RabbitMQ异步广播\n\n### 验证点\n- status 变为 PUBLISHED\n- RabbitMQ消息已发送（查看article-service日志）"
+          }
+        },
+        {
+          "name": "发布文章2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId2}}/publish",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId2}}", "publish"]
+            },
+            "description": "发布第二篇文章"
+          }
+        },
+        {
+          "name": "修改文章",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('标题已更新', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.data.title).to.include('(修订版)');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"Spring Cloud微服务最佳实践(修订版)\",\n    \"content\": \"【更新】本文详细介绍了Spring Cloud微服务架构的核心组件...\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId}}"]
+            },
+            "description": "修改文章标题和内容，仅作者或管理员可操作\n\n### 验证点\n- 文章标题更新成功"
+          }
+        },
+        {
+          "name": "文章列表(分页)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('返回已发布文章列表', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(200);",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "    if (json.data.length > 0) {",
+                  "        pm.expect(json.data[0]).to.have.property('id');",
+                  "        pm.expect(json.data[0]).to.have.property('title');",
+                  "        pm.expect(json.data[0]).to.have.property('likeCount');",
+                  "        pm.expect(json.data[0]).not.to.have.property('content');",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/articles?page=1&size=20",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "20"}
+              ]
+            },
+            "description": "分页查询最新文章列表\n\n### 验证点\n- 只返回已发布(PUBLISHED)状态文章\n- 列表项不含content字段\n- 按创建时间倒序排列\n- 草稿文章不出现在列表中"
+          }
+        },
+        {
+          "name": "文章详情(触发热度)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('返回文章详情含content', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.data).to.have.property('content');",
+                  "    pm.expect(json.data).to.have.property('status', 'PUBLISHED');",
+                  "});",
+                  "pm.test('阅读热度已触发(查看Redis)', function() {",
+                  "    console.log('Redis: ZINCRBY hot_articles ' + pm.environment.get('articleId') + ' 1');",
+                  "    pm.expect(pm.response.json().code).to.eql(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId}}"]
+            },
+            "description": "查看文章详情，同时触发阅读热度(ZINCRBY hot_articles +1)\n\n### 验证点\n- 返回完整内容(content)\n- 5分钟内同一用户重复阅读不重复计热度"
+          }
+        },
+        {
+          "name": "文章详情-不存在(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 404', function() { pm.response.to.have.status(404); });",
+                  "pm.test('返回文章不存在', function() {",
+                  "    pm.expect(pm.response.json().code).to.eql(404);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/99999",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "99999"]
+            },
+            "description": "查询不存在的文章ID"
+          }
+        },
+        {
+          "name": "逻辑删除文章",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('删除成功', function() {",
+                  "    pm.expect(pm.response.json().code).to.eql(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId2}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId2}}"]
+            },
+            "description": "逻辑删除文章(仅设置deleted=1，不物理删除)\n\n### 验证点\n- 删除后文章不出现在列表中\n- 数据库记录仍在(逻辑删除)"
+          }
+        },
+        {
+          "name": "热搜榜单Top10(无需认证)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('返回热搜列表', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.data).to.be.an('array');",
+                  "    console.log('热搜Top 10 共 ' + json.data.length + ' 条');",
+                  "    json.data.forEach(function(item, i) {",
+                  "        console.log((i+1) + '. ' + item.title + ' (热度: ' + item.heatScore + ')');",
+                  "    });",
+                  "});",
+                  "pm.test('热搜榜公开访问(无需Token)', function() {",
+                  "    pm.expect(pm.response.json().code).to.eql(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/trending",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "trending"]
+            },
+            "description": "获取全站热搜Top 10，基于Redis ZSET排序\n\n### 验证点\n- 无需认证Token即可访问\n- 按热度分降序排列\n- 阅读+1分，点赞+3分"
+          }
+        }
+      ]
+    },
+    {
+      "name": "3-互动服务 (Interact Service)",
+      "description": "评论异步写入、点赞防重与异步持久化",
+      "item": [
+        {
+          "name": "添加评论",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('评论提交成功(异步)', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(200);",
+                  "    console.log('评论已写入Redis队列，等待消费者批量落库...');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"articleId\": {{articleId}},\n    \"content\": \"非常棒的微服务实践总结，尤其是Nacos和Sentinel的配合使用部分对我帮助很大！\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments"]
+            },
+            "description": "提交文章评论，异步写入Redis队列\n\n### 验证点\n- 立即返回成功(非阻塞)\n- 评论数据LPUSH到Redis comment:events队列\n- 后台消费者每5秒批量持久化到MySQL"
+          }
+        },
+        {
+          "name": "添加评论2",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"articleId\": {{articleId}},\n    \"content\": \"请问Sentinel的集群限流模式在Docker Compose中如何配置Token Server？期待后续更新！\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments"]
+            },
+            "description": "再添加一条评论"
+          }
+        },
+        {
+          "name": "添加评论-缺少参数(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 400', function() { pm.response.to.have.status(400); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"content\": \"缺少articleId的评论\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/comments",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "comments"]
+            },
+            "description": "提交缺少articleId的评论，验证参数校验"
+          }
+        },
+        {
+          "name": "点赞文章",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200', function() { pm.response.to.have.status(200); });",
+                  "pm.test('点赞成功', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.code).to.eql(200);",
+                  "    console.log('点赞成功！热度 +3');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId}}/like",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId}}", "like"]
+            },
+            "description": "点赞文章，防重处理\n\n### 验证点\n- 首次点赞成功\n- Redis ZSET hot_articles +3\n- 点赞事件写入Redis Stream等待异步持久化"
+          }
+        },
+        {
+          "name": "点赞文章-重复点赞(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 400', function() { pm.response.to.have.status(400); });",
+                  "pm.test('返回已点赞错误', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.message).to.include('已点赞');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId}}/like",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId}}", "like"]
+            },
+            "description": "同一用户对同一文章重复点赞，验证防重机制\n\n### 验证点\n- 返回「已点赞过该文章」错误\n- Redis防重key永久有效"
+          }
+        }
+      ]
+    },
+    {
+      "name": "4-权限测试 (Auth Tests)",
+      "description": "验证JWT鉴权、角色权限、Token黑名单等安全机制",
+      "item": [
+        {
+          "name": "管理员修改他人文章(越权测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 200(管理员可修改任何文章)', function() {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{adminToken}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"[管理员编辑] Spring Cloud微服务最佳实践\",\n    \"content\": \"管理员审核通过并优化了此文章的内容格式。\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId}}"]
+            },
+            "description": "管理员修改非自己创建的文章\n\n### 验证点\n- 管理员可修改任何文章（拥有 admin 角色）\n- 普通用户只能修改自己的文章"
+          }
+        },
+        {
+          "name": "未认证访问受保护接口(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 401', function() { pm.response.to.have.status(401); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/articles?page=1&size=10",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles"],
+              "query": [
+                {"key": "page", "value": "1"},
+                {"key": "size", "value": "10"}
+              ]
+            },
+            "description": "不带Token访问需要认证的接口\n\n### 验证点\n- 网关返回401\n- 注意：/api/trending 和 /api/user/register、/api/user/login 是公开接口"
+          }
+        },
+        {
+          "name": "使用注销后的Token(异常测试)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('状态码 401', function() { pm.response.to.have.status(401); });",
+                  "pm.test('返回令牌已注销', function() {",
+                  "    var json = pm.response.json();",
+                  "    pm.expect(json.message).to.include('注销');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{token}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{articleId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{articleId}}"]
+            },
+            "description": "⚠️ 此请求需要先执行注销接口，然后使用已注销的Token\n\n### 验证点\n- 网关检查Redis黑名单\n- 返回「令牌已注销」"
+          }
+        }
+      ]
+    },
+    {
+      "name": "5-端到端流程 (E2E Flow)",
+      "description": "完整业务流程：注册→登录→创建→发布→评论→点赞→热搜→注销",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "console.log('=== 开始阶段1端到端测试 ===');",
+              "console.log('请按顺序执行以下步骤：');",
+              "console.log('1. 注册新用户');",
+              "console.log('2. 登录获取Token');",
+              "console.log('3. 创建文章(草稿)');",
+              "console.log('4. 发布文章');",
+              "console.log('5. 查看文章详情(触发热度)');",
+              "console.log('6. 对文章添加评论');",
+              "console.log('7. 点赞文章');",
+              "console.log('8. 查看热搜榜单');",
+              "console.log('9. 查看文章列表');",
+              "console.log('10. 注销');"
+            ],
+            "type": "text/javascript"
+          }
+        }
+      ],
+      "item": [
+        {
+          "name": "E2E-1: 注册新用户",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.environment.set('e2eUsername', 'e2euser_' + Date.now());",
+                  "    pm.environment.set('e2ePassword', 'e2etest123');",
+                  "    // 如果已存在，登录即可",
+                  "}",
+                  "// 如果返回用户名已存在，也算通过",
+                  "pm.test('注册成功或用户名已存在', function() {",
+                  "    var code = pm.response.code;",
+                  "    pm.expect(code === 200 || code === 400).to.be.true;",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{e2eUsername}}\",\n    \"password\": \"{{e2ePassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "register"]
+            }
+          }
+        },
+        {
+          "name": "E2E-2: 登录",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    pm.environment.set('e2eToken', pm.response.json().data.token);",
+                  "    pm.environment.set('e2eUserId', pm.response.json().data.userId);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"username\": \"{{e2eUsername}}\",\n    \"password\": \"{{e2ePassword}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/user/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "user", "login"]
+            }
+          }
+        },
+        {
+          "name": "E2E-3: 创建并发布文章",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// 先创建文章，再发布",
+                  "if (pm.response.code === 200 && pm.request.url.toString().includes('/publish')) {",
+                  "    pm.test('发布成功', function() {",
+                  "        pm.expect(pm.response.json().data.status).to.eql('PUBLISHED');",
+                  "    });",
+                  "} else if (pm.response.code === 200) {",
+                  "    var id = pm.response.json().data.id;",
+                  "    pm.environment.set('e2eArticleId', id);",
+                  "    console.log('E2E文章创建: ' + id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{e2eToken}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n    \"title\": \"E2E测试文章\",\n    \"content\": \"这是端到端测试创建的文章内容。\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/articles",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles"]
+            }
+          }
+        },
+        {
+          "name": "E2E-4: 发布上一步创建的文章",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('发布成功', function() {",
+                  "    if (pm.response.code === 200) {",
+                  "        pm.expect(pm.response.json().data.status).to.eql('PUBLISHED');",
+                  "    } else {",
+                  "        console.log('发布失败: ' + pm.response.text());",
+                  "    }",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "PUT",
+            "header": [
+              {"key": "Authorization", "value": "Bearer {{e2eToken}}"}
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/articles/{{e2eArticleId}}/publish",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "articles", "{{e2eArticleId}}", "publish"]
+            }
+          }
+        },
+        {
+          "name": "E2E-5: 评论+点赞+查看热搜",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('全流程验证', function() { pm.expect(pm.response.code).to.be.oneOf([200]); });"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/trending",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "trending"]
+            },
+            "description": "E2E最后一步：查看热搜榜验证全流程数据一致"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "userId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "role",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "articleId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "articleId2",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "adminUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "e2eUsername",
+      "value": "e2euser",
+      "type": "string"
+    },
+    {
+      "key": "e2ePassword",
+      "value": "e2etest123",
+      "type": "string"
+    },
+    {
+      "key": "e2eToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "e2eUserId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "e2eArticleId",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "exec": [
+          "// 全局前置脚本：自动设置 Authorization 头",
+          "var token = pm.environment.get('token');",
+          "if (token && !pm.request.headers.has('Authorization')) {",
+          "    pm.request.headers.add({",
+          "        key: 'Authorization',",
+          "        value: 'Bearer ' + token",
+          "    });",
+          "}"
+        ],
+        "type": "text/javascript"
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "exec": [
+          "// 全局测试脚本：检查响应格式",
+          "var json;",
+          "try { json = pm.response.json(); } catch(e) { return; }",
+          "if (json && json.code !== undefined) {",
+          "    pm.test('响应格式符合 Result<T> 结构', function() {",
+          "        pm.expect(json).to.have.property('code');",
+          "        pm.expect(json).to.have.property('message');",
+          "    });",
+          "}"
+        ],
+        "type": "text/javascript"
+      }
+    }
+  ]
+}

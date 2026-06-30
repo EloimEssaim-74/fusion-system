@@ -1,0 +1,52 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: gateway-service
+  main:
+    web-application-type: reactive
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:kb-platform}
+        enabled: true
+      config:
+        server-addr: ${NACOS_SERVER_ADDR:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:kb-platform}
+        file-extension: yml
+        enabled: false
+
+    gateway:
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+      routes:
+        # User Service
+        - id: user-service
+          uri: lb://user-service
+          predicates:
+            - Path=/api/user/**
+        # Article Service
+        - id: article-service
+          uri: lb://article-service
+          predicates:
+            - Path=/api/articles/**,/api/trending
+        # Interact Service
+        - id: interact-service
+          uri: lb://interact-service
+          predicates:
+            - Path=/api/comments,/api/comments/**,/api/articles/*/like
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+logging:
+  level:
+    com.kb.gateway: DEBUG
+    org.springframework.cloud.gateway: INFO
